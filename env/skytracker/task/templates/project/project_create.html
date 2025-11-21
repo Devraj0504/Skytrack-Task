@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function loadProjects() {
-    fetch('/projects_view/', { credentials: 'same-origin' })
+    fetch('/projects/', { credentials: 'same-origin' })
       .then(res => res.json())
       .then(data => {
         renderProjectTable(data.projects || []);
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
 
-    fetch('/projects_view/', {
+    fetch('/projects/', {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -174,20 +174,6 @@ document.addEventListener('DOMContentLoaded', function () {
   window.editProject = function (projectId) {
     // implement edit flow if needed
     console.log('edit', projectId);
-  };
-
-  window.deleteProject = function (projectId) {
-    if (!confirm('Delete this project?')) return;
-    fetch(`/projects/${projectId}/delete/`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'X-CSRFToken': getCookie('csrftoken') }
-    })
-    .then(res => {
-      if (res.ok) loadProjects();
-      else alert('Failed to delete project.');
-    })
-    .catch(() => alert('Failed to delete project.'));
   };
 
   loadProjects();

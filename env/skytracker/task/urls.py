@@ -7,8 +7,8 @@ urlpatterns = [
 
     path('dashboard/', views.dashboard_view, name='dashboard'),
 
-    path('projects/', views.create_project, name='create_project'),
-    path('projects_view/', views.projects_view, name='projects_view'),
+    path('projects_page/', views.projects_page, name='projects_page'),
+    path('projects/', views.projects, name='projects'),
 
     path('projects/<int:project_id>/tasks/', views.project_tasks_view, name='project_tasks'),
 

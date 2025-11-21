@@ -55,15 +55,29 @@ def dashboard_view(request):
     }
 
     return render(request, "accounts/dashboard.html", context)
+
+
+@login_required
+def projects_page(request):
+    user = request.user.master_user
+    if user.user_type == 1:
+        projects = Master_Project.objects.all()
+    else:
+        projects = Master_Project.objects.filter(owner=user)
+    user_list = Master_User.objects.filter(status=1)
+    return render(request, "project/project_create.html", {"projects": projects , "user_list": user_list})
+
+
+
 @csrf_exempt
 @login_required
-def create_project(request):
+def projects(request):
     user = request.user.master_user
 
     if request.method == "POST":
         try:
             data = json.loads(request.body) if request.content_type == "application/json" else request.POST
-        except Exception:
+        except:
             return JsonResponse({"error": "Invalid JSON format."}, status=400)
 
         name = data.get("name")
@@ -72,11 +86,8 @@ def create_project(request):
         if not name:
             return JsonResponse({"error": "Project name is required"}, status=400)
 
-        if Master_Project.objects.filter(name=name, owner=user).exists():
-            return JsonResponse(
-                {"error": "A project with this name already exists for this user."},
-                status=400,
-            )
+        if Master_Project.objects.filter(owner=user, name=name).exists():
+            return JsonResponse({"error": "Project already exists"}, status=400)
 
         project = Master_Project.objects.create(
             name=name,
@@ -84,96 +95,45 @@ def create_project(request):
             owner=user
         )
 
-        return JsonResponse(
-            {
-                "project_id": project.project_id,
-                "name": project.name,
-                "description": project.description,
-                "owner": project.owner.user_name,
-                "created_at": project.created_at.isoformat(),
-                "updated_at": project.updated_at.isoformat(),
-            },
-            status=201,
-        )
+        return JsonResponse({
+            "project_id": project.project_id,
+            "name": project.name,
+            "description": project.description,
+            "owner": project.owner.user_name,
+            "created_at": project.created_at.isoformat(),
+            "updated_at": project.updated_at.isoformat(),
+        }, status=201)
 
-    user_list = Master_User.objects.filter(status=1)
-    return render(request, "project/project_create.html", {"user_list": user_list})
+    # ========== GET (List My Projects) ==========
+    search = request.GET.get("search", "")
+    
 
-@csrf_exempt
-@login_required
-def projects_view(request):
-    user = request.user.master_user
-
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body) if request.content_type == "application/json" else request.POST
-        except Exception:
-            return JsonResponse({"error": "Invalid JSON format."}, status=400)
-
-        name = data.get("name")
-        description = data.get("description", "")
-        manager_id = data.get("project_manager")
-
-        if not name:
-            return JsonResponse({"error": "Project name is required"}, status=400)
-
-        if user.user_type == 1:
-            if not manager_id:
-                return JsonResponse({"error": "Project manager is required for admin."}, status=400)
-            try:
-                manager = Master_User.objects.get(u_id=manager_id)
-            except Master_User.DoesNotExist:
-                return JsonResponse({"error": "Invalid manager ID"}, status=400)
-        else:
-            manager = user  # normal user = owner himself
-
-        if Master_Project.objects.filter(owner=manager, name=name).exists():
-            return JsonResponse(
-                {"error": "Project with this name already exists for this user."},
-                status=400,
-            )
-
-        project = Master_Project.objects.create(
-            name=name,
-            description=description,
-            owner=manager
-        )
-
-        return JsonResponse(
-            {
-                "project_id": project.project_id,
-                "name": project.name,
-                "description": project.description,
-                "owner": project.owner.user_name,
-                "created_at": project.created_at.isoformat(),
-                "updated_at": project.updated_at.isoformat(),
-            },
-            status=201,
-        )
-
+    projects_list = Master_Project.objects.filter(owner=user)
     if user.user_type == 1:
-        qs = Master_Project.objects.select_related("owner").all()
+        projects_list = Master_Project.objects.select_related("owner").all()
     else:
-        qs = Master_Project.objects.select_related("owner").filter(
+        projects_list = Master_Project.objects.select_related("owner").filter(
             Q(owner=user) | Q(tasks__assignee=user)
         ).distinct()
+    if search:
+        projects_list = projects_list.filter(name__icontains=search)
 
-    projects_data = [
-        {
-            "project_id": p.project_id,
-            "name": p.name,
-            "description": p.description,
-            "owner": p.owner.user_name,
-            "created_at": p.created_at.isoformat(),
-            "updated_at": p.updated_at.isoformat(),
-        }
-        for p in qs
-    ]
+    return JsonResponse({
+        "projects": [
+            {
+                "project_id": p.project_id,
+                "name": p.name,
+                "description": p.description,
+                "owner": p.owner.user_name,
+                "created_at": p.created_at.isoformat(),
+                "updated_at": p.updated_at.isoformat(),
+            }
+            for p in projects_list
+        ]
+    })
 
-    return JsonResponse({"projects": projects_data})
 
-
-
+@csrf_exempt
 @login_required
 def project_spreadsheet(request):
     project_id = request.GET.get("project_id")
@@ -209,53 +169,50 @@ def project_spreadsheet(request):
         "user_list": user_list,
     })
 
+    
+@csrf_exempt
 @login_required
 @require_http_methods(["POST"])
 def project_tasks_view(request, project_id):
     user = request.user.master_user
 
-    project_qs = Master_Project.objects.select_related("owner")
-
     if user.user_type == 1:
-        project = get_object_or_404(project_qs, project_id=project_id)
+        project = get_object_or_404(Master_Project, project_id=project_id)
     else:
-        project = get_object_or_404(project_qs, project_id=project_id, owner=user)
+        project = get_object_or_404(Master_Project, project_id=project_id, owner=user)
 
-    try:
-        data = json.loads(request.body) if request.content_type == "application/json" else request.POST
-    except Exception:
-        return JsonResponse({"error": "Invalid JSON format."}, status=400)
-
+    data = json.loads(request.body) if request.content_type == "application/json" else request.POST
     title = data.get("title")
     description = data.get("description", "")
     status = data.get("status", "todo")
     priority = data.get("priority")
     assignee_id = data.get("assignee_id")
     due_date_str = data.get("due_date")
+    due_date = None
 
     if not title or not priority:
         return JsonResponse({"error": "Title and priority are required."}, status=400)
 
     try:
         priority = int(priority)
-    except ValueError:
+    except (TypeError, ValueError):
         return JsonResponse({"error": "Priority must be an integer."}, status=400)
 
-    due_date = None
     if due_date_str:
         try:
             due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
         except ValueError:
-            return JsonResponse(
-                {"error": "Invalid due_date format, must be YYYY-MM-DD."},
-                status=400
-            )
+            return JsonResponse({"error": "Invalid due_date format, must be YYYY-MM-DD."}, status=400)
+
     assignee = None
     if assignee_id:
         try:
             assignee = Master_User.objects.get(u_id=assignee_id)
         except Master_User.DoesNotExist:
             return JsonResponse({"error": "Assignee not found."}, status=400)
+
+    if not (user.user_type == 1 or project.owner == user):
+        return JsonResponse({"error": "You do not have permission to add tasks to this project."}, status=403)
 
     task = Master_Task(
         project=project,
@@ -270,7 +227,8 @@ def project_tasks_view(request, project_id):
     try:
         task.save()
     except ValidationError as e:
-        return JsonResponse({"error": e.message_dict if hasattr(e, "message_dict") else e.messages}, status=400)
+        messages = e.message_dict if hasattr(e, "message_dict") else e.messages
+        return JsonResponse({"error": messages}, status=400)
 
     return JsonResponse(
         {
@@ -285,7 +243,8 @@ def project_tasks_view(request, project_id):
             "assignee": task.assignee.user_name if task.assignee else None,
         },
         status=201,
-    )
+    ) 
+
 
 
 @login_required
