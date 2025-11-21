@@ -15,45 +15,37 @@ from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 def dashboard_view(request):
     user = request.user.master_user
+    today = timezone.now().date()
 
     if user.user_type == 1:
-        total_projects = Master_Project.objects.count()
-        total_tasks = Master_Task.objects.count()
-        task_counts_by_status_qs = (
-            Master_Task.objects.values("status").annotate(count=Count("task_id"))
-        )
-        today = timezone.now().date()
-        upcoming_tasks = (
-            Master_Task.objects.filter(
-                status__in=["todo", "in_progress"],
-                due_date__isnull=False,
-                due_date__gte=today,
-            )
-            .order_by("due_date", "priority")[:5]
-        )
+        project_qs = Master_Project.objects.all()
+        task_qs = Master_Task.objects.all()
     else:
-        total_projects = Master_Project.objects.filter(owner=user).count()
-        total_tasks = Master_Task.objects.filter(project__owner=user).count()
-        task_counts_by_status_qs = (
-            Master_Task.objects.filter(project__owner=user)
-            .values("status")
-            .annotate(count=Count("task_id"))
-        )
-        today = timezone.now().date()
-        upcoming_tasks = (
-            Master_Task.objects.filter(
-                project__owner=user,
-                status__in=["todo", "in_progress"],
-                due_date__isnull=False,
-                due_date__gte=today,
-            )
-            .order_by("due_date", "priority")[:5]
-        )
+        project_qs = Master_Project.objects.filter(owner=user)
+        task_qs = Master_Task.objects.filter(project__owner=user)
 
-    task_counts_by_status = {row["status"]: row["count"] for row in task_counts_by_status_qs}
+    total_projects = project_qs.count()
+    total_tasks = task_qs.count()
 
-    if not upcoming_tasks:
-        upcoming_tasks = "No upcoming tasks!"
+    task_counts_by_status_qs = (
+        task_qs.values("status").annotate(count=Count("task_id"))
+    )
+    task_counts_by_status = {
+        row["status"]: row["count"] for row in task_counts_by_status_qs
+    }
+
+    upcoming_tasks_qs = (
+        task_qs.filter(
+            status__in=["todo", "in_progress"],
+            due_date__isnull=False,
+            due_date__gte=today,
+        )
+        .order_by("due_date", "priority")[:5]
+    )
+
+    upcoming_tasks = (
+        upcoming_tasks_qs if upcoming_tasks_qs else "No upcoming tasks!"
+    )
 
     context = {
         "total_projects": total_projects,
@@ -61,13 +53,18 @@ def dashboard_view(request):
         "task_counts_by_status": task_counts_by_status,
         "upcoming_tasks": upcoming_tasks,
     }
-    return render(request, "accounts/dashboard.html", context)
 
+    return render(request, "accounts/dashboard.html", context)
 @csrf_exempt
+@login_required
 def create_project(request):
     user = request.user.master_user
-    if request.POST:
-        data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+        except Exception:
+            return JsonResponse({"error": "Invalid JSON format."}, status=400)
 
         name = data.get("name")
         description = data.get("description", "")
@@ -75,7 +72,17 @@ def create_project(request):
         if not name:
             return JsonResponse({"error": "Project name is required"}, status=400)
 
-        project = Master_Project.objects.create(name=name, description=description, owner=user)
+        if Master_Project.objects.filter(name=name, owner=user).exists():
+            return JsonResponse(
+                {"error": "A project with this name already exists for this user."},
+                status=400,
+            )
+
+        project = Master_Project.objects.create(
+            name=name,
+            description=description,
+            owner=user
+        )
 
         return JsonResponse(
             {
@@ -88,9 +95,9 @@ def create_project(request):
             },
             status=201,
         )
-    else:
-        user_list = Master_User.objects.filter(status=1)
-        return render(request, "project/project_create.html", {"user_list": user_list})
+
+    user_list = Master_User.objects.filter(status=1)
+    return render(request, "project/project_create.html", {"user_list": user_list})
 
 @csrf_exempt
 @login_required
@@ -98,19 +105,33 @@ def projects_view(request):
     user = request.user.master_user
 
     if request.method == "POST":
-        data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+        try:
+            data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+        except Exception:
+            return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
         name = data.get("name")
         description = data.get("description", "")
         manager_id = data.get("project_manager")
-        manager = Master_User.objects.get(u_id=manager_id)
 
         if not name:
             return JsonResponse({"error": "Project name is required"}, status=400)
 
-        owner_to_check = manager if user.user_type == 1 else user
+        if user.user_type == 1:
+            if not manager_id:
+                return JsonResponse({"error": "Project manager is required for admin."}, status=400)
+            try:
+                manager = Master_User.objects.get(u_id=manager_id)
+            except Master_User.DoesNotExist:
+                return JsonResponse({"error": "Invalid manager ID"}, status=400)
+        else:
+            manager = user  # normal user = owner himself
 
-        if Master_Project.objects.filter(owner=owner_to_check, name=name).exists():
-            return JsonResponse({"error": "Project with this name already exists"}, status=400)
+        if Master_Project.objects.filter(owner=manager, name=name).exists():
+            return JsonResponse(
+                {"error": "Project with this name already exists for this user."},
+                status=400,
+            )
 
         project = Master_Project.objects.create(
             name=name,
@@ -123,17 +144,17 @@ def projects_view(request):
                 "project_id": project.project_id,
                 "name": project.name,
                 "description": project.description,
+                "owner": project.owner.user_name,
                 "created_at": project.created_at.isoformat(),
                 "updated_at": project.updated_at.isoformat(),
-                "owner": project.owner.user_name,
             },
-            status=201
+            status=201,
         )
 
     if user.user_type == 1:
-        projects = Master_Project.objects.all()
+        qs = Master_Project.objects.select_related("owner").all()
     else:
-        projects = Master_Project.objects.filter(
+        qs = Master_Project.objects.select_related("owner").filter(
             Q(owner=user) | Q(tasks__assignee=user)
         ).distinct()
 
@@ -142,79 +163,93 @@ def projects_view(request):
             "project_id": p.project_id,
             "name": p.name,
             "description": p.description,
+            "owner": p.owner.user_name,
             "created_at": p.created_at.isoformat(),
             "updated_at": p.updated_at.isoformat(),
-            "owner": p.owner.user_name,
         }
-        for p in projects
+        for p in qs
     ]
 
     return JsonResponse({"projects": projects_data})
 
 
 
-@csrf_exempt
 @login_required
 def project_spreadsheet(request):
-    project_id = request.POST.get("project_id") or request.GET.get("project_id")
+    project_id = request.GET.get("project_id")
+
     if not project_id:
         return HttpResponse("Missing project_id parameter.", status=400)
+
+    try:
+        project_id = int(project_id)
+    except ValueError:
+        return HttpResponse("Invalid project_id.", status=400)
 
     user = request.user.master_user
 
     if user.user_type == 1:
-        project = get_object_or_404(Master_Project, project_id=project_id)
+        project = get_object_or_404(
+            Master_Project.objects.select_related("owner"),
+            project_id=project_id
+        )
     else:
-        project = get_object_or_404(Master_Project, project_id=project_id, owner=user)
+        project = get_object_or_404(
+            Master_Project.objects.select_related("owner"),
+            project_id=project_id,
+            owner=user
+        )
 
-    user_list = Master_User.objects.filter(status=1)
+    user_list = Master_User.objects.filter(status=1).only("u_id", "user_name")
+
     return render(request, "project/task.html", {
         "project": project,
         "project_id": project.project_id,
         "project_name": project.name,
         "user_list": user_list,
     })
-    
-@csrf_exempt
+
 @login_required
 @require_http_methods(["POST"])
 def project_tasks_view(request, project_id):
     user = request.user.master_user
 
-    # Check project access
-    if user.user_type == 1:
-        project = get_object_or_404(Master_Project, project_id=project_id)
-    else:
-        project = get_object_or_404(Master_Project, project_id=project_id, owner=user)
+    project_qs = Master_Project.objects.select_related("owner")
 
-    # Parse data
-    data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+    if user.user_type == 1:
+        project = get_object_or_404(project_qs, project_id=project_id)
+    else:
+        project = get_object_or_404(project_qs, project_id=project_id, owner=user)
+
+    try:
+        data = json.loads(request.body) if request.content_type == "application/json" else request.POST
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
     title = data.get("title")
     description = data.get("description", "")
     status = data.get("status", "todo")
     priority = data.get("priority")
     assignee_id = data.get("assignee_id")
     due_date_str = data.get("due_date")
-    due_date = None
 
-    # Required fields
     if not title or not priority:
         return JsonResponse({"error": "Title and priority are required."}, status=400)
 
-    # Priority check
     try:
         priority = int(priority)
-    except (TypeError, ValueError):
+    except ValueError:
         return JsonResponse({"error": "Priority must be an integer."}, status=400)
 
-    # Due date validation
+    due_date = None
     if due_date_str:
         try:
             due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
         except ValueError:
-            return JsonResponse({"error": "Invalid due_date format, must be YYYY-MM-DD."}, status=400)
-
-    # Assignee check
+            return JsonResponse(
+                {"error": "Invalid due_date format, must be YYYY-MM-DD."},
+                status=400
+            )
     assignee = None
     if assignee_id:
         try:
@@ -222,11 +257,6 @@ def project_tasks_view(request, project_id):
         except Master_User.DoesNotExist:
             return JsonResponse({"error": "Assignee not found."}, status=400)
 
-    # Permission check
-    if not (user.user_type == 1 or project.owner == user):
-        return JsonResponse({"error": "You do not have permission to add tasks to this project."}, status=403)
-
-    # Create task
     task = Master_Task(
         project=project,
         title=title,
@@ -237,12 +267,10 @@ def project_tasks_view(request, project_id):
         assignee=assignee,
     )
 
-    # Model-level validation (priority range, done+future-date)
     try:
         task.save()
     except ValidationError as e:
-        messages = e.message_dict if hasattr(e, "message_dict") else e.messages
-        return JsonResponse({"error": messages}, status=400)
+        return JsonResponse({"error": e.message_dict if hasattr(e, "message_dict") else e.messages}, status=400)
 
     return JsonResponse(
         {
@@ -258,6 +286,8 @@ def project_tasks_view(request, project_id):
         },
         status=201,
     )
+
+
 @login_required
 def tasks_list(request):
     user = request.user.master_user
