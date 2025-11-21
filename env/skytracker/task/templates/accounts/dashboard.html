@@ -1,0 +1,81 @@
+{% extends "layout/base.html" %}
+{% block content %}
+
+<div class="container-fluid py-4">
+  <div class="row g-4 mb-4">
+    <div class="col-12 col-md-4">
+      <div class="card bg-primary shadow-sm text-white border-0 h-100">
+        <div class="card-body text-center py-4 d-flex flex-column align-items-center justify-content-center">
+          <div class="display-4 fw-bold mb-2">{{ total_projects }}</div>
+          <div class="fs-5">Total Projects</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card bg-success shadow-sm text-white border-0 h-100">
+        <div class="card-body text-center py-4 d-flex flex-column align-items-center justify-content-center">
+          <div class="display-4 fw-bold mb-2">{{ total_tasks }}</div>
+          <div class="fs-5">Total Tasks</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card bg-info shadow-sm text-white border-0 h-100">
+        <div class="card-body text-center py-4 d-flex flex-column align-items-center justify-content-center">
+          <div class="fs-2 mb-3">
+            <i class="bi bi-list-task"></i>
+          </div>
+          <div class="fs-6 mb-2">Task Status</div>
+          <div class="d-flex justify-content-center gap-2 flex-wrap">
+            <span class="badge rounded-pill bg-danger px-3 py-2">To Do: {{ task_counts_by_status.todo|default:0 }}</span>
+            <span class="badge rounded-pill bg-primary px-3 py-2">In Progress: {{ task_counts_by_status.in_progress|default:0 }}</span>
+            <span class="badge rounded-pill bg-success px-3 py-2">Done: {{ task_counts_by_status.done|default:0 }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-12">
+      <div class="card shadow-sm border-0">
+        <div class="card-header bg-white border-0">
+          <h5 class="mb-0">Top 5 Upcoming Tasks</h5>
+        </div>
+        <ul class="list-group list-group-flush">
+          {% if upcoming_tasks == "No upcoming tasks!" %}
+            <li class="list-group-item text-center fst-italic text-muted py-4">
+                No upcoming tasks.
+            </li>
+          {% else %}
+            {% for task in upcoming_tasks %}
+              <li class="list-group-item d-flex justify-content-between align-items-center py-3 px-3">
+                <div>
+                  <span class="fw-semibold fs-6">{{ task.title }}</span>
+                  <span class="badge bg-secondary text-dark ms-3 px-3 py-2 fs-6">
+                    {{ task.due_date|date:"M d, Y" }}
+                  </span>
+                  <br>
+                  <small class="text-muted">{{ task.get_status_display }}</small>
+                </div>
+
+                <span class="badge 
+                  {% if task.status == 'todo' %}bg-danger
+                  {% elif task.status == 'in_progress' %}bg-primary
+                  {% elif task.status == 'done' %}bg-success
+                  {% else %}bg-secondary
+                  {% endif %}
+                  rounded-pill text-uppercase px-3 py-2 fs-6">
+                  {{ task.status|title }}
+                </span>
+              </li>
+            {% endfor %}
+          {% endif %}
+
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

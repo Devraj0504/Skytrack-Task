@@ -1,0 +1,196 @@
+{% extends "layout/base.html" %}
+{% block content %}
+<div>
+  <h1 class="mb-2">My Projects</h1>
+
+  {% if request.session.user_type == 1 %}
+  <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#createProjectModal">
+    <i class="fa fa-plus"></i> Add New Project
+  </button>
+  {% endif %}
+
+  <div id="projectsList" class="list-group mb-4">
+    <div id="projectsList_div" class="table-responsive card p-3">
+      <table id="projectsList_tbl" class="table table-bordered table-striped mb-0 rounded dataTable">
+        <thead class="thead-light">
+          <tr>
+            <th width="1%">#</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Project Owner</th>
+           
+          </tr>
+        </thead>
+        <tbody id="project_table_body">
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal fade" id="createProjectModal" tabindex="-1" aria-labelledby="createProjectModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add Project</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="createProjectForm">
+            <div class="mb-3">
+              <label for="projectName" class="form-label">Project Name</label>
+              <input type="text" class="form-control" id="projectName" name="name" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="projectDescription" class="form-label">Description</label>
+              <textarea class="form-control" id="projectDescription" name="description" rows="3"></textarea>
+            </div>
+
+            <div class="mb-3">
+              <label for="project_manager" class="form-label">Project Manager</label>
+              <select name="project_manager" id="project_manager" class="form-control" required>
+                <option value="">Select Project Manager</option>
+                {% for u in user_list %}
+                  <option value="{{ u.u_id }}">{{ u.user_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div id="formError" class="text-danger mb-2"></div>
+
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-primary">Create Project</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const createProjectForm = document.getElementById('createProjectForm');
+  const formError = document.getElementById('formError');
+  const tbody = document.getElementById('project_table_body');
+  const tableSelector = '#projectsList_tbl';
+
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return decodeURIComponent(parts.pop().split(';').shift());
+    return null;
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString();
+  }
+
+  function renderProjectTable(projects) {
+    if ($.fn.dataTable.isDataTable(tableSelector)) {
+      $(tableSelector).DataTable().clear().destroy();
+    }
+    tbody.innerHTML = '';
+
+    if (!projects || projects.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No projects found.</td></tr>';
+      return;
+    }
+
+    projects.forEach((proj, i) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${i + 1}</td>
+        <td>
+          <a href="/project_tasks/?project_id=${proj.project_id}" class="text-info text-decoration-underline">${proj.name}</a>
+        </td>
+        <td>${proj.description || ''}</td>
+        <td>${proj.owner || ''}</td>
+        
+      `;
+      tbody.appendChild(row);
+    });
+
+    $(tableSelector).DataTable({
+      dom: 'Blfrtip',
+      buttons: ['copy', 'csv', 'excel', 'pdf', 'print'],
+      lengthMenu: [[25, 50, 100, -1], [25, 50, 100, "All"]],
+      order: [[0, 'asc']]
+    });
+  }
+
+  function loadProjects() {
+    fetch('/projects_view/', { credentials: 'same-origin' })
+      .then(res => res.json())
+      .then(data => {
+        renderProjectTable(data.projects || []);
+      })
+      .catch(() => {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Failed to load projects.</td></tr>';
+      });
+  }
+
+  createProjectForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    formError.textContent = '';
+
+    const name = document.getElementById('projectName').value.trim();
+    const description = document.getElementById('projectDescription').value.trim();
+    const projectManager = document.getElementById('project_manager').value;
+
+    if (!name) {
+      formError.textContent = 'Project name is required.';
+      return;
+    }
+
+    fetch('/projects_view/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken')
+      },
+      body: JSON.stringify({ name, description, project_manager: projectManager })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        formError.textContent = data.error;
+      } else {
+        const modalEl = document.getElementById('createProjectModal');
+        const modal = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.hide();
+        createProjectForm.reset();
+        loadProjects();
+      }
+    })
+    .catch(() => {
+      formError.textContent = 'An error occurred. Please try again.';
+    });
+  });
+
+  window.editProject = function (projectId) {
+    // implement edit flow if needed
+    console.log('edit', projectId);
+  };
+
+  window.deleteProject = function (projectId) {
+    if (!confirm('Delete this project?')) return;
+    fetch(`/projects/${projectId}/delete/`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') }
+    })
+    .then(res => {
+      if (res.ok) loadProjects();
+      else alert('Failed to delete project.');
+    })
+    .catch(() => alert('Failed to delete project.'));
+  };
+
+  loadProjects();
+});
+</script>
+{% endblock %}

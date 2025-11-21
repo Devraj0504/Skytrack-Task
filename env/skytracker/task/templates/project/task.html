@@ -1,0 +1,183 @@
+{% extends "layout/base.html" %}
+{% block content %}
+
+<h2>Tasks for Project: {{ project_name }}</h2>
+
+<button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#createTaskModal">Add New Task</button>
+
+<table class="table table-bordered" id="task_table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Title</th>
+      <th>Status</th>
+      <th>Priority</th>
+      <th>Due Date</th>
+      <th>Assignee</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="modal fade" id="createTaskModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="createTaskForm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add Task</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">Title</label>
+            <input type="text" name="title" class="form-control" required>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Status</label>
+            <select name="status" class="form-select">
+              <option value="todo">To Do</option>
+              <option value="in_progress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Priority (1-5)</label>
+            <input type="number" name="priority" class="form-control" min="1" max="5" required>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Due Date</label>
+            <input type="date" name="due_date" class="form-control">
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Assignee</label>
+            <select name="assignee" id="assigneeSelect" class="form-control">
+              <option value="">Select Assignee (Optional)</option>
+              {% for u in user_list %}
+                <option value="{{ u.u_id }}">{{ u.user_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div id="taskFormError" class="text-danger mt-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Create Task</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+$(document).ready(function () {
+  const projectId = "{{ project_id }}";
+  const tbody = $("#task_table tbody");
+  const form = $("#createTaskForm");
+  const formError = $("#taskFormError");
+
+  function loadTasks() {
+    $.ajax({
+      url: `/tasks/?project_id=${projectId}`,
+      method: "GET",
+      dataType: "json",
+      success: function (data) {
+        renderTasks(data.tasks || []);
+      },
+      error: function (xhr) {
+        let msg = '<tr><td colspan="6" class="text-danger">Failed to load tasks.</td></tr>';
+        if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
+          msg = `<tr><td colspan="6" class="text-danger">${xhr.responseJSON.error}</td></tr>`;
+        }
+        tbody.html(msg);
+      }
+    });
+  }
+  
+  function renderTasks(tasks) {
+    tbody.empty();
+    if (!tasks.length) {
+      tbody.html('<tr><td colspan="6" class="text-center text-muted">No tasks available in this project</td></tr>');
+      return;
+    }
+    tasks.forEach((task, i) => {
+      const row = `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${task.title}</td>
+          <td>${task.status}</td>
+          <td>${task.priority}</td>
+          <td>${task.due_date || ""}</td>
+          <td>${task.assignee || ""}</td>
+        </tr>
+      `;
+      tbody.append(row);
+    });
+  }
+
+  form.on("submit", function (e) {
+    e.preventDefault();
+    formError.text("");
+
+    const title = form.find('[name="title"]').val().trim();
+    const status = form.find('[name="status"]').val();
+    const priority = form.find('[name="priority"]').val();
+    const due_date = form.find('[name="due_date"]').val();
+    const assignee_id = $("#assigneeSelect").val() || null;
+
+    if (!title || !priority) {
+      formError.text("Title and priority are required.");
+      return;
+    }
+
+    $.ajax({
+      url: `/projects/${projectId}/tasks/`,
+      method: "POST",
+      contentType: "application/json",
+      headers: { "X-CSRFToken": getCookie("csrftoken") },
+      data: JSON.stringify({
+        title,
+        status,
+        priority,
+        due_date,
+        assignee_id,
+      }),
+      success: function (data) {
+        if (data.error) {
+          formError.text(data.error);
+        } else {
+          const modal = bootstrap.Modal.getInstance(document.getElementById("createTaskModal"));
+          modal.hide();
+          form[0].reset();
+          loadTasks();
+        }
+      },
+      error: function () {
+        formError.text("Something went wrong.");
+      }
+    });
+  });
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === `${name}=`) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  loadTasks();
+});
+</script>
+
+{% endblock %}
